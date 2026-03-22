@@ -1,13 +1,14 @@
-from django.shortcuts import render, redirect
 from django.contrib.auth import login
-from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.views.generic import CreateView, ListView, DetailView
+from django.db.models import Count, OuterRef, Q, Subquery
+from django.http import JsonResponse
+from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
+from django.views.generic import CreateView, ListView
+
 from .forms import CustomUserCreationForm
 from .models import CustomUser, Message
-from django.db.models import Q
 
 
 class RegisterView(CreateView):
@@ -25,30 +26,78 @@ class RegisterView(CreateView):
         return super().form_invalid(form)
 
 
-from django.db.models import Q, OuterRef, Subquery, Count
-
 class UserListView(LoginRequiredMixin, ListView):
     model = CustomUser
     template_name = "user_list.html"
     context_object_name = "users"
 
     def get_queryset(self):
+        query = self.request.GET.get("q")
+
         last_message = Message.objects.filter(
-            (Q(sender=OuterRef('pk'), receiver=self.request.user)) |
-            (Q(sender=self.request.user, receiver=OuterRef('pk')))
-        ).order_by('-timestamp')
+            (Q(sender=OuterRef("pk"), receiver=self.request.user))
+            | (Q(sender=self.request.user, receiver=OuterRef("pk")))
+        ).order_by("-timestamp")
 
-        unread_count = Message.objects.filter(
-            sender=OuterRef('pk'),
-            receiver=self.request.user,
-            is_read=False
-        ).values('sender').annotate(c=Count('*')).values('c')
+        unread_count = (
+            Message.objects.filter(
+                sender=OuterRef("pk"), receiver=self.request.user, is_read=False
+            )
+            .values("sender")
+            .annotate(c=Count("*"))
+            .values("c")
+        )
 
-        return CustomUser.objects.exclude(id=self.request.user.id).exclude(is_superuser=True).annotate(
-            last_msg=Subquery(last_message.values('content')[:1]),
-            last_msg_time=Subquery(last_message.values('timestamp')[:1]),
-            unread_count=Subquery(unread_count)
-        ).order_by('-last_msg_time')
+        queryset = (
+            CustomUser.objects.exclude(id=self.request.user.id)
+            .exclude(is_superuser=True)
+            .annotate(
+                last_msg=Subquery(last_message.values("content")[:1]),
+                last_msg_time=Subquery(last_message.values("timestamp")[:1]),
+                unread_count=Subquery(unread_count),
+            )
+        )
+
+        if query:
+            queryset = queryset.filter(username__icontains=query)
+        else:
+            # Only show users we have a message history with
+            queryset = queryset.filter(
+                Q(sent_messages__receiver=self.request.user)
+                | Q(received_messages__sender=self.request.user)
+            ).distinct()
+
+        return queryset.order_by("-last_msg_time")
+
+
+@login_required
+def user_search_api(request):
+    query = request.GET.get("q", "")
+    if len(query) < 1:
+        return JsonResponse({"users": []})
+
+    users = (
+        CustomUser.objects.exclude(id=request.user.id)
+        .exclude(is_superuser=True)
+        .filter(
+            Q(username__icontains=query)
+            | Q(first_name__icontains=query)
+            | Q(last_name__icontains=query)
+        )[:10]
+    )
+
+    user_list = []
+    for u in users:
+        user_list.append(
+            {
+                "username": u.username,
+                "full_name": f"{u.first_name} {u.last_name}".strip() or u.username,
+                "initial": (u.first_name[0] if u.first_name else u.username[0]).upper(),
+                "is_online": u.is_online,
+            }
+        )
+
+    return JsonResponse({"users": user_list})
 
 
 @login_required

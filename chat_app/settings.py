@@ -46,10 +46,28 @@ AUTH_USER_MODEL = "chat.CustomUser"
 
 ASGI_APPLICATION = "chat_app.asgi.application"
 
+# Channel layers for real-time WebSockets
 CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     },
+}
+
+# For production, use RedisChannelLayer:
+# CHANNEL_LAYERS = {
+#     "default": {
+#         "BACKEND": "channels_redis.core.RedisChannelLayer",
+#         "CONFIG": {
+#             "hosts": [("127.0.0.1", 6379)],
+#         },
+#     },
+# }
+
+# Cache for connection counting and other temporary data
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
 }
 
 LOGIN_URL = "login"

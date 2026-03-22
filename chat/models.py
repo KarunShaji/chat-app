@@ -1,6 +1,6 @@
-from django.db import models
-from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from django.contrib.auth.models import AbstractUser
+from django.db import models
 
 
 class CustomUser(AbstractUser):
@@ -26,6 +26,7 @@ class Message(models.Model):
     )
     content = models.TextField(blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
+    is_delivered = models.BooleanField(default=False)
     is_read = models.BooleanField(default=False)
 
     def __str__(self):

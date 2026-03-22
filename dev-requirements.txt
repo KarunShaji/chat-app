@@ -1,0 +1,2 @@
+coverage==7.5.4
+pre-commit==3.8.0

@@ -1,11 +1,53 @@
 {% extends 'base.html' %}
-{% block title %}Users - Chat App{% endblock %}
+{% block title %}Recent Chats - Chat App{% endblock %}
 {% block content %}
+<style>
+    #search-results-box {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 1000;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        display: none;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .search-result-item {
+        padding: 12px 20px;
+        display: flex;
+        align-items: center;
+        text-decoration: none;
+        color: var(--text-color);
+        border-bottom: 1px solid var(--border-color);
+    }
+    .search-result-item:last-child { border-bottom: none; }
+    .search-result-item:hover { background-color: var(--input-bg); }
+</style>
+
 <div class="row justify-content-center">
     <div class="col-md-8">
         <div class="card shadow-sm">
             <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
-                <h2 class="h4 fw-bold text-dark">Recent Chats</h2>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h4 fw-bold text-dark mb-0">Recent Chats</h2>
+                </div>
+                <!-- Search Bar -->
+                <div class="position-relative mb-3">
+                    <div class="input-group bg-light rounded-pill px-3 py-1">
+                        <span class="input-group-text bg-transparent border-0 text-muted">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-search" viewBox="0 0 16 16">
+                                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                            </svg>
+                        </span>
+                        <input type="text" id="user-search-input" class="form-control bg-transparent border-0 shadow-none" placeholder="Search people by name or username..." autocomplete="off">
+                    </div>
+                    <!-- Real-time Results Box -->
+                    <div id="search-results-box"></div>
+                </div>
             </div>
             <div class="card-body px-0">
                 <div class="list-group list-group-flush" id="user-list">
@@ -19,7 +61,7 @@
                             </div>
                             <div class="flex-grow-1">
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <h6 class="mb-0 fw-bold">{{ u.username }}</h6>
+                                    <h6 class="mb-0 fw-bold username-text">{{ u.username }}</h6>
                                     <small class="text-muted last-msg-time">
                                         {% if u.is_online %}
                                             <span class="text-success small fw-normal">Online Now</span>
@@ -51,8 +93,7 @@
                         </a>
                     {% empty %}
                         <div class="text-center py-5">
-                            <p class="text-muted">No other users found.</p>
-                            <a href="#" class="btn btn-primary btn-sm mt-2">Invite Friends</a>
+                            <p class="text-muted">No recent chats. Search for someone above!</p>
                         </div>
                     {% endfor %}
                 </div>
@@ -64,7 +105,66 @@
 
 {% block extra_js %}
 <script>
-    // Force reload on back button to update read counts/last messages
+    const searchInput = document.getElementById('user-search-input');
+    const resultsBox = document.getElementById('search-results-box');
+    const userItems = document.querySelectorAll('.user-item');
+
+    let searchTimeout;
+    searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimeout);
+        const query = searchInput.value.toLowerCase().trim();
+        
+        // 1. Filter existing (Recent Chats) list instantly
+        userItems.forEach(item => {
+            const username = item.getAttribute('data-username').toLowerCase();
+            if (username.includes(query)) {
+                item.style.setProperty('display', 'flex', 'important');
+            } else {
+                item.style.setProperty('display', 'none', 'important');
+            }
+        });
+
+        // 2. Fetch new users from API (Search result box)
+        if (query.length < 1) {
+            resultsBox.style.display = 'none';
+            return;
+        }
+
+        searchTimeout = setTimeout(async () => {
+            const response = await fetch(`/api/users/search/?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            
+            if (data.users.length > 0) {
+                resultsBox.innerHTML = data.users.map(u => `
+                    <a href="/chat/${u.username}/" class="search-result-item">
+                        <div class="position-relative me-3">
+                            <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-weight: bold;">
+                                ${u.initial}
+                            </div>
+                            <span class="status-dot ${u.is_online ? 'online' : 'offline'} position-absolute bottom-0 end-0"></span>
+                        </div>
+                        <div>
+                            <div class="fw-bold">${u.full_name}</div>
+                            <small class="text-muted">@${u.username}</small>
+                        </div>
+                    </a>
+                `).join('');
+                resultsBox.style.display = 'block';
+            } else {
+                resultsBox.innerHTML = '<div class="p-3 text-center text-muted">No people found</div>';
+                resultsBox.style.display = 'block';
+            }
+        }, 300);
+    });
+
+    // Close results box when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !resultsBox.contains(e.target)) {
+            resultsBox.style.display = 'none';
+        }
+    });
+
+    // WebSocket and page logic...
     window.addEventListener('pageshow', function(event) {
         if (event.persisted || (typeof window.performance != 'undefined' && window.performance.navigation.type === 2)) {
             window.location.reload();
@@ -121,11 +221,24 @@
                     typingEl.style.display = 'none';
                 }
             }
+        } else if (data.type === 'user_status_update') {
+            const userRow = document.querySelector(`[data-username="${data.username}"]`);
+            if (userRow) {
+                const statusDot = userRow.querySelector('.status-dot');
+                const timeEl = userRow.querySelector('.last-msg-time');
+                
+                if (data.is_online) {
+                    statusDot.classList.remove('offline');
+                    statusDot.classList.add('online');
+                    timeEl.innerHTML = '<span class="text-success small fw-normal">Online Now</span>';
+                } else {
+                    statusDot.classList.remove('online');
+                    statusDot.classList.add('offline');
+                    const time = new Date(data.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                    timeEl.textContent = time;
+                }
+            }
         }
-    };
-
-    dashboardSocket.onclose = function(e) {
-        console.error('Dashboard socket closed unexpectedly');
     };
 </script>
 {% endblock %}
