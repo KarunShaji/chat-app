@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+{% block title %}Users - Chat App{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
+                <h2 class="h4 fw-bold text-dark">Recent Chats</h2>
+            </div>
+            <div class="card-body px-0">
+                <div class="list-group list-group-flush" id="user-list">
+                    {% for u in users %}
+                        <a href="{% url 'chat_detail' u.username %}" class="list-group-item list-group-item-action user-item border-0 py-3 px-4 d-flex align-items-center" data-username="{{ u.username }}">
+                            <div class="position-relative me-3">
+                                <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">
+                                    {{ u.username|first|upper }}
+                                </div>
+                                <span class="status-dot {% if u.is_online %}online{% else %}offline{% endif %} position-absolute bottom-0 end-0"></span>
+                            </div>
+                            <div class="flex-grow-1">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0 fw-bold">{{ u.username }}</h6>
+                                    <small class="text-muted last-msg-time">
+                                        {% if u.is_online %}
+                                            <span class="text-success small fw-normal">Online Now</span>
+                                        {% elif u.last_msg_time %}
+                                            {{ u.last_msg_time|date:"h:i A" }}
+                                        {% else %}
+                                            {{ u.last_seen|date:"h:i A" }}
+                                        {% endif %}
+                                    </small>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="last-msg-container">
+                                        <p class="mb-0 last-msg-content {% if u.unread_count %}text-dark fw-bold{% else %}text-muted{% endif %} small text-truncate" style="max-width: 250px;">
+                                            {% if u.last_msg %}
+                                                {{ u.last_msg }}
+                                            {% else %}
+                                                Click to start chatting...
+                                            {% endif %}
+                                        </p>
+                                        <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
+                                    </div>
+                                    <div class="unread-badge-container">
+                                        {% if u.unread_count %}
+                                            <span class="badge bg-primary rounded-pill small unread-count">{{ u.unread_count }}</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    {% empty %}
+                        <div class="text-center py-5">
+                            <p class="text-muted">No other users found.</p>
+                            <a href="#" class="btn btn-primary btn-sm mt-2">Invite Friends</a>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Force reload on back button to update read counts/last messages
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted || (typeof window.performance != 'undefined' && window.performance.navigation.type === 2)) {
+            window.location.reload();
+        }
+    });
+
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const dashboardSocket = new WebSocket(
+        `${protocol}://${window.location.host}/ws/dashboard/`
+    );
+
+    dashboardSocket.onmessage = function(e) {
+        const data = JSON.parse(e.data);
+        if (data.type === 'dashboard_update') {
+            const sender = data.sender_username;
+            const message = data.message;
+            const time = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
+            const userRow = document.querySelector(`[data-username="${sender}"]`);
+            if (userRow) {
+                const msgEl = userRow.querySelector('.last-msg-content');
+                msgEl.textContent = message;
+                msgEl.classList.remove('text-muted');
+                msgEl.classList.add('text-dark', 'fw-bold');
+                
+                const timeEl = userRow.querySelector('.last-msg-time');
+                if (!timeEl.querySelector('.text-success')) {
+                    timeEl.textContent = time;
+                }
+
+                const badgeContainer = userRow.querySelector('.unread-badge-container');
+                let badge = badgeContainer.querySelector('.unread-count');
+                if (badge) {
+                    badge.textContent = parseInt(badge.textContent) + 1;
+                } else {
+                    badgeContainer.innerHTML = `<span class="badge bg-primary rounded-pill small unread-count">1</span>`;
+                }
+
+                const listGroup = document.getElementById('user-list');
+                listGroup.prepend(userRow);
+            }
+        } else if (data.type === 'dashboard_typing') {
+            const sender = data.sender_username;
+            const isTyping = data.is_typing;
+            const userRow = document.querySelector(`[data-username="${sender}"]`);
+            if (userRow) {
+                const msgEl = userRow.querySelector('.last-msg-content');
+                const typingEl = userRow.querySelector('.dashboard-typing-indicator');
+                if (isTyping) {
+                    msgEl.style.display = 'none';
+                    typingEl.style.display = 'block';
+                } else {
+                    msgEl.style.display = 'block';
+                    typingEl.style.display = 'none';
+                }
+            }
+        }
+    };
+
+    dashboardSocket.onclose = function(e) {
+        console.error('Dashboard socket closed unexpectedly');
+    };
+</script>
+{% endblock %}
