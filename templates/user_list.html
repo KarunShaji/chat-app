@@ -2,6 +2,30 @@
 {% block title %}Recent Chats - Chat App{% endblock %}
 {% block content %}
 <style>
+    /* Desktop layout overrides */
+    .main-content { height: calc(100vh - 56px); overflow: hidden; }
+    .row.g-0.h-100 { height: 100%; overflow: hidden; }
+    
+    #dashboard-col {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-color);
+        background: var(--card-bg);
+        z-index: 10;
+    }
+
+    #chat-col {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        background: var(--chat-bg);
+        position: relative;
+    }
+
+    .list-group-item { border: none !important; border-bottom: 1px solid var(--border-color) !important; margin-bottom: 0 !important; }
+    .list-group-item.active-chat { background-color: var(--input-bg); border-left: 4px solid var(--primary-green) !important; }
+    
     #search-results-box {
         position: absolute;
         top: 100%;
@@ -16,86 +40,164 @@
         max-height: 400px;
         overflow-y: auto;
     }
-    .search-result-item {
-        padding: 12px 20px;
+
+    /* Chat Area Styling */
+    #chat-placeholder {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        text-decoration: none;
+        justify-content: center;
+        height: 100%;
         color: var(--text-color);
-        border-bottom: 1px solid var(--border-color);
+        opacity: 0.6;
+        text-align: center;
+        padding: 20px;
     }
-    .search-result-item:last-child { border-bottom: none; }
-    .search-result-item:hover { background-color: var(--input-bg); }
+
+    #active-chat-container {
+        display: none;
+        flex-direction: column;
+        height: 100%;
+    }
+
+    .chat-box { 
+        flex: 1; 
+        overflow-y: auto; 
+        padding: 20px; 
+        background-color: var(--chat-bg); 
+        display: flex;
+        flex-direction: column;
+    }
+
+    .message { margin-bottom: 15px; padding: 10px 16px; border-radius: 18px; max-width: 75%; font-size: 0.95rem; line-height: 1.4; position: relative; box-shadow: 0 1px 0.5px rgba(0,0,0,0.13); }
+    .sent { align-self: flex-end; background-color: var(--msg-sent-bg); color: var(--msg-sent-text); border-bottom-right-radius: 4px; }
+    .received { align-self: flex-start; background-color: var(--msg-received-bg); color: var(--msg-received-text); border-bottom-left-radius: 4px; }
+    .timestamp { font-size: 0.75rem; opacity: 0.8; display: block; margin-top: 4px; }
+    .read-status { margin-left: 4px; font-weight: bold; }
+    .status-seen { color: #34b7f1 !important; }
+
+    /* Typing Animation */
+    .typing-dots span {
+        width: 6px; height: 6px; margin: 0 1px;
+        background-color: var(--primary-green); border-radius: 50%;
+        display: inline-block; animation: typing 1.4s infinite both;
+    }
+    .typing-dots span:nth-child(2) { animation-delay: .2s; }
+    .typing-dots span:nth-child(3) { animation-delay: .4s; }
+    @keyframes typing {
+        0%, 80%, 100% { transform: scale(0); }
+        40% { transform: scale(1); }
+    }
+
+    @media (max-width: 767.98px) {
+        #chat-col { display: none !important; }
+        #dashboard-col { width: 100%; border-right: none; }
+        .main-content { overflow-y: auto; height: auto; }
+    }
 </style>
 
-<div class="row justify-content-center">
-    <div class="col-md-10 col-lg-8">
-        <div class="card shadow-sm">
-            <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h2 class="h4 fw-bold text-dark mb-0">Recent Chats</h2>
+<div class="row g-0 h-100">
+    <!-- Left Column: User List (25% on desktop, 100% on mobile) -->
+    <div id="dashboard-col" class="col-12 col-md-4 col-lg-3">
+        <div class="p-3 border-bottom bg-white sticky-top" style="z-index: 20;">
+            <h4 class="fw-bold mb-3">Chats</h4>
+            <div class="position-relative">
+                <div class="input-group bg-light rounded-pill px-3 py-1">
+                    <span class="input-group-text bg-transparent border-0 text-muted p-0 me-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-search" viewBox="0 0 16 16">
+                            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                        </svg>
+                    </span>
+                    <input type="text" id="user-search-input" class="form-control bg-transparent border-0 shadow-none p-0" placeholder="Search chats..." autocomplete="off">
                 </div>
-                <!-- Search Bar -->
-                <div class="position-relative mb-3">
-                    <div class="input-group bg-light rounded-pill px-3 py-1">
-                        <span class="input-group-text bg-transparent border-0 text-muted">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-search" viewBox="0 0 16 16">
-                                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
-                            </svg>
-                        </span>
-                        <input type="text" id="user-search-input" class="form-control bg-transparent border-0 shadow-none" placeholder="Search people by name or username..." autocomplete="off">
+                <div id="search-results-box"></div>
+            </div>
+        </div>
+
+        <div class="flex-grow-1 overflow-auto" id="user-list">
+            {% for u in users %}
+                <a href="{% url 'chat_detail' u.username %}" class="list-group-item list-group-item-action user-item py-3 px-3 d-flex align-items-center" data-username="{{ u.username }}">
+                    <div class="position-relative me-3">
+                        <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; font-weight: bold;">
+                            {{ u.username|first|upper }}
+                        </div>
+                        <span class="status-dot {% if u.is_online %}online{% else %}offline{% endif %} position-absolute bottom-0 end-0"></span>
                     </div>
-                    <!-- Real-time Results Box -->
-                    <div id="search-results-box"></div>
+                    <div class="flex-grow-1 overflow-hidden">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 fw-bold username-text text-truncate">{{ u.username }}</h6>
+                            <small class="text-muted last-msg-time">
+                                {% if u.is_online %}
+                                    <span class="text-success small">Online</span>
+                                {% elif u.last_msg_time %}
+                                    {{ u.last_msg_time|date:"h:i A" }}
+                                {% else %}
+                                    {{ u.last_seen|date:"h:i A" }}
+                                {% endif %}
+                            </small>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="last-msg-container overflow-hidden w-100 me-2">
+                                <p class="mb-0 last-msg-content {% if u.unread_count %}text-dark fw-bold{% else %}text-muted{% endif %} small text-truncate">
+                                    {{ u.last_msg|default:"Start chatting..." }}
+                                </p>
+                                <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
+                            </div>
+                            <div class="unread-badge-container">
+                                {% if u.unread_count %}
+                                    <span class="badge bg-primary rounded-pill small unread-count">{{ u.unread_count }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            {% empty %}
+                <div id="no-chats-msg" class="text-center py-5">
+                    <p class="text-muted">No recent chats.</p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Right Column: Chat (75% on desktop, hidden on mobile) -->
+    <div id="chat-col" class="col-md-8 col-lg-9 d-none d-md-flex">
+        <div id="chat-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-chat-dots-fill mb-3" viewBox="0 0 16 16">
+                <path d="M16 8c0 3.866-3.582 7-8 7a9.06 9.06 0 0 1-2.347-.306c-.584.296-1.925.864-4.181 1.234-.2.032-.352-.176-.273-.362.354-.836.674-1.95.77-2.966C.744 11.37 0 9.76 0 8c0-3.866 3.582-7 8-7s8 3.134 8 7zM5 8a1 1 0 1 0-2 0 1 1 0 0 0 2 0zm4 0a1 1 0 1 0-2 0 1 1 0 0 0 2 0zm3 1a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/>
+            </svg>
+            <h3>Chat App Desktop</h3>
+            <p>Select a chat from the left to start messaging</p>
+        </div>
+
+        <div id="active-chat-container">
+            <!-- Header -->
+            <div class="p-3 border-bottom bg-white d-flex align-items-center justify-content-between" style="z-index: 20;">
+                <div class="d-flex align-items-center">
+                    <div class="position-relative me-3">
+                        <div id="active-chat-avatar" class="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-weight: bold;"></div>
+                        <span id="active-chat-status-dot" class="status-dot position-absolute bottom-0 end-0"></span>
+                    </div>
+                    <div>
+                        <h6 id="active-chat-username" class="mb-0 fw-bold"></h6>
+                        <small id="active-chat-status-text" class="text-muted small"></small>
+                    </div>
                 </div>
             </div>
-            <div class="card-body px-0">
-                <div class="list-group list-group-flush" id="user-list">
-                    {% for u in users %}
-                        <a href="{% url 'chat_detail' u.username %}" class="list-group-item list-group-item-action user-item border-0 py-3 px-4 d-flex align-items-center" data-username="{{ u.username }}">
-                            <div class="position-relative me-3">
-                                <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">
-                                    {{ u.username|first|upper }}
-                                </div>
-                                <span class="status-dot {% if u.is_online %}online{% else %}offline{% endif %} position-absolute bottom-0 end-0"></span>
-                            </div>
-                            <div class="flex-grow-1 overflow-hidden">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <h6 class="mb-0 fw-bold username-text text-truncate pe-2">{{ u.username }}</h6>
-                                    <small class="text-muted last-msg-time flex-shrink-0">
-                                        {% if u.is_online %}
-                                            <span class="text-success small fw-normal">Online Now</span>
-                                        {% elif u.last_msg_time %}
-                                            {{ u.last_msg_time|date:"h:i A" }}
-                                        {% else %}
-                                            {{ u.last_seen|date:"h:i A" }}
-                                        {% endif %}
-                                    </small>
-                                </div>
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <div class="last-msg-container overflow-hidden w-100 me-2">
-                                        <p class="mb-0 last-msg-content {% if u.unread_count %}text-dark fw-bold{% else %}text-muted{% endif %} small text-truncate">
-                                            {% if u.last_msg %}
-                                                {{ u.last_msg }}
-                                            {% else %}
-                                                Click to start chatting...
-                                            {% endif %}
-                                        </p>
-                                        <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
-                                    </div>
-                                    <div class="unread-badge-container flex-shrink-0">
-                                        {% if u.unread_count %}
-                                            <span class="badge bg-primary rounded-pill small unread-count">{{ u.unread_count }}</span>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                            </div>
-                        </a>
-                    {% empty %}
-                        <div id="no-chats-msg" class="text-center py-5">
-                            <p class="text-muted">No recent chats. Search for someone above!</p>
-                        </div>
-                    {% endfor %}
+
+            <!-- Messages -->
+            <div class="chat-box" id="chat-box">
+                <!-- Messages load here -->
+            </div>
+
+            <!-- Footer/Input -->
+            <div class="p-3 bg-white border-top">
+                <div class="input-group">
+                    <input type="text" id="chat-input" class="form-control border-0 bg-light py-2 px-3 rounded-pill me-2" placeholder="Type a message..." autocomplete="off">
+                    <button id="chat-submit" class="btn btn-primary rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; min-width: 40px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" class="bi bi-send-fill" viewBox="0 0 16 16">
+                            <path d="M15.964.686a.5.5 0 0 0-.65-.65L.767 5.855H.766l-.452.18a.5.5 0 0 0-.082.887l.41.26.001.002 4.995 3.178 3.178 4.995.002.002.26.41a.5.5 0 0 0 .886-.083l6-15Zm-1.833 1.89L6.637 10.07l-.215-.338a.5.5 0 0 0-.154-.154l-.338-.215 7.494-7.494 1.178-.471-.47 1.178Z"/>
+                        </svg>
+                    </button>
                 </div>
             </div>
         </div>
@@ -107,39 +209,41 @@
 <script>
     const searchInput = document.getElementById('user-search-input');
     const resultsBox = document.getElementById('search-results-box');
-    const userItems = document.querySelectorAll('.user-item');
-    const listGroup = document.getElementById('user-list');
+    const userList = document.getElementById('user-list');
     const noChatsMsg = document.getElementById('no-chats-msg');
+    const chatPlaceholder = document.getElementById('chat-placeholder');
+    const activeChatContainer = document.getElementById('active-chat-container');
+    const chatBox = document.getElementById('chat-box');
+    const chatInput = document.getElementById('chat-input');
+    const chatSubmit = document.getElementById('chat-submit');
+    
+    let activeChatUsername = null;
+    let chatSocket = null;
+    let typingTimeout;
 
-    let searchTimeout;
+    // Search logic
     searchInput.addEventListener('input', () => {
-        clearTimeout(searchTimeout);
         const query = searchInput.value.toLowerCase().trim();
         
-        // 1. Filter existing (Recent Chats) list instantly
-        const currentUserItems = document.querySelectorAll('.user-item');
-        currentUserItems.forEach(item => {
+        // Filter list
+        document.querySelectorAll('.user-item').forEach(item => {
             const username = item.getAttribute('data-username').toLowerCase();
-            if (username.includes(query)) {
-                item.style.setProperty('display', 'flex', 'important');
-            } else {
-                item.style.setProperty('display', 'none', 'important');
-            }
+            item.style.display = username.includes(query) ? 'flex' : 'none';
         });
 
-        // 2. Fetch new users from API (Search result box)
         if (query.length < 1) {
             resultsBox.style.display = 'none';
             return;
         }
 
-        searchTimeout = setTimeout(async () => {
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(async () => {
             const response = await fetch(`/api/users/search/?q=${encodeURIComponent(query)}`);
             const data = await response.json();
             
             if (data.users.length > 0) {
                 resultsBox.innerHTML = data.users.map(u => `
-                    <a href="/chat/${u.username}/" class="search-result-item">
+                    <a href="#" class="search-result-item" onclick="openChatFromSearch('${u.username}'); return false;">
                         <div class="position-relative me-3">
                             <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-weight: bold;">
                                 ${u.initial}
@@ -160,24 +264,183 @@
         }, 300);
     });
 
-    // Close results box when clicking outside
     document.addEventListener('click', (e) => {
         if (!searchInput.contains(e.target) && !resultsBox.contains(e.target)) {
             resultsBox.style.display = 'none';
         }
     });
 
-    // WebSocket and page logic...
-    window.addEventListener('pageshow', function(event) {
-        if (event.persisted || (typeof window.performance != 'undefined' && window.performance.navigation.type === 2)) {
-            window.location.reload();
+    // Handle clicks on user list
+    userList.addEventListener('click', function(e) {
+        const userItem = e.target.closest('.user-item');
+        if (userItem && window.innerWidth >= 768) {
+            e.preventDefault();
+            const username = userItem.getAttribute('data-username');
+            openChat(username);
         }
     });
 
+    function openChatFromSearch(username) {
+        resultsBox.style.display = 'none';
+        searchInput.value = '';
+        // Unhide all items in case they were filtered
+        document.querySelectorAll('.user-item').forEach(i => i.style.display = 'flex');
+        openChat(username);
+    }
+
+    async function openChat(username) {
+        if (activeChatUsername === username) return;
+
+        // Highlight active chat in list
+        document.querySelectorAll('.user-item').forEach(i => i.classList.remove('active-chat'));
+        const listRow = document.querySelector(`.user-item[data-username="${username}"]`);
+        if (listRow) {
+            listRow.classList.add('active-chat');
+            // Clear unread badge
+            const badge = listRow.querySelector('.unread-badge-container');
+            if (badge) badge.innerHTML = '';
+            const msgContent = listRow.querySelector('.last-msg-content');
+            if (msgContent) msgContent.classList.remove('fw-bold', 'text-dark');
+        }
+
+        activeChatUsername = username;
+        chatPlaceholder.style.display = 'none';
+        activeChatContainer.style.display = 'flex';
+        chatBox.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
+
+        // Disconnect old socket
+        if (chatSocket) {
+            chatSocket.close();
+        }
+
+        try {
+            const response = await fetch(`/api/messages/${username}/`);
+            const data = await response.json();
+            
+            // Update Header
+            document.getElementById('active-chat-username').textContent = data.other_user.username;
+            document.getElementById('active-chat-avatar').textContent = data.other_user.initial;
+            const statusDot = document.getElementById('active-chat-status-dot');
+            const statusText = document.getElementById('active-chat-status-text');
+            
+            if (data.other_user.is_online) {
+                statusDot.className = 'status-dot online position-absolute bottom-0 end-0';
+                statusText.textContent = 'Online Now';
+            } else {
+                statusDot.className = 'status-dot offline position-absolute bottom-0 end-0';
+                const time = data.other_user.last_seen ? new Date(data.other_user.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'offline';
+                statusText.textContent = `Last seen: ${time}`;
+            }
+
+            // Render Messages
+            chatBox.innerHTML = '';
+            data.messages.forEach(msg => {
+                appendMessage(msg.sender, msg.content, msg.timestamp, msg.is_read, msg.is_delivered);
+            });
+            chatBox.innerHTML += `<div id="typing-bubble" class="message received d-none" style="opacity: 0.8; padding: 5px 15px;"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+            scrollToBottom();
+
+            // Connect WebSocket
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            chatSocket = new WebSocket(`${protocol}://${window.location.host}/ws/chat/${username}/`);
+
+            chatSocket.onmessage = function(e) {
+                const wsData = JSON.parse(e.data);
+                if (wsData.type === 'chat_message') {
+                    appendMessage(wsData.sender, wsData.message, wsData.timestamp, wsData.is_read, wsData.is_delivered);
+                    scrollToBottom();
+                } else if (wsData.type === 'typing') {
+                    const bubble = document.getElementById('typing-bubble');
+                    if (wsData.is_typing) {
+                        bubble.classList.remove('d-none');
+                        scrollToBottom();
+                    } else {
+                        bubble.classList.add('d-none');
+                    }
+                } else if (wsData.type === 'read_receipt') {
+                    document.querySelectorAll('.sent .read-status').forEach(span => {
+                        span.textContent = '✓✓';
+                        span.classList.add('status-seen');
+                    });
+                } else if (wsData.type === 'user_status_update') {
+                    if (wsData.username === activeChatUsername) {
+                        const sDot = document.getElementById('active-chat-status-dot');
+                        const sText = document.getElementById('active-chat-status-text');
+                        if (wsData.is_online) {
+                            sDot.className = 'status-dot online position-absolute bottom-0 end-0';
+                            sText.textContent = 'Online Now';
+                        } else {
+                            sDot.className = 'status-dot offline position-absolute bottom-0 end-0';
+                            const time = new Date(wsData.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                            sText.textContent = `Last seen: ${time}`;
+                        }
+                    }
+                }
+            };
+
+        } catch (error) {
+            console.error('Error loading chat:', error);
+            chatBox.innerHTML = '<div class="text-center py-5 text-danger">Error loading conversation.</div>';
+        }
+    }
+
+    function appendMessage(sender, content, timestamp, isRead, isDelivered) {
+        const bubble = document.getElementById('typing-bubble');
+        const messageDiv = document.createElement('div');
+        const isSelf = sender === "{{ user.username }}";
+        messageDiv.className = `message ${isSelf ? 'sent' : 'received'}`;
+        
+        const localTime = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+        
+        let statusTicks = '✓';
+        let statusClass = '';
+        if (isRead) {
+            statusTicks = '✓✓';
+            statusClass = 'status-seen';
+        } else if (isDelivered) {
+            statusTicks = '✓✓';
+        }
+        
+        let statusHtml = isSelf ? `<span class="read-status text-white ${statusClass}">${statusTicks}</span>` : '';
+        messageDiv.innerHTML = `${content}<span class="timestamp">${localTime} ${statusHtml}</span>`;
+        
+        if (bubble) {
+            chatBox.insertBefore(messageDiv, bubble);
+        } else {
+            chatBox.appendChild(messageDiv);
+        }
+    }
+
+    function sendMessage() {
+        const msg = chatInput.value.trim();
+        if (msg && chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify({'type': 'chat_message', 'message': msg}));
+            chatInput.value = '';
+            sendTypingStatus(false);
+        }
+    }
+
+    chatSubmit.onclick = sendMessage;
+    chatInput.onkeyup = e => { if (e.keyCode === 13) sendMessage(); };
+    chatInput.oninput = () => {
+        sendTypingStatus(true);
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => sendTypingStatus(false), 2000);
+    };
+
+    function sendTypingStatus(isTyping) {
+        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify({'type': 'typing', 'is_typing': isTyping}));
+        }
+    }
+
+    function scrollToBottom() {
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // DASHBOARD SOCKET (Remains for user list updates)
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const dashboardSocket = new WebSocket(
-        `${protocol}://${window.location.host}/ws/dashboard/`
-    );
+    const dashboardSocket = new WebSocket(`${protocol}://${window.location.host}/ws/dashboard/`);
 
     dashboardSocket.onmessage = function(e) {
         const data = JSON.parse(e.data);
@@ -187,74 +450,63 @@
             const initial = data.sender_initial;
             const time = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
-            let userRow = document.querySelector(`[data-username="${sender}"]`);
+            // If it's the active chat, the chatSocket will handle the message append.
+            // But we still update the user list row.
             
+            let userRow = document.querySelector(`.user-item[data-username="${sender}"]`);
             if (!userRow) {
-                // Remove "No recent chats" if it exists
                 if (noChatsMsg) noChatsMsg.remove();
-
-                // Create new row
-                const newRow = document.createElement('a');
-                newRow.href = `/chat/${sender}/`;
-                newRow.className = 'list-group-item list-group-item-action user-item border-0 py-3 px-4 d-flex align-items-center';
-                newRow.setAttribute('data-username', sender);
-                newRow.innerHTML = `
+                userRow = document.createElement('a');
+                userRow.href = `/chat/${sender}/`;
+                userRow.className = 'list-group-item list-group-item-action user-item py-3 px-3 d-flex align-items-center';
+                userRow.setAttribute('data-username', sender);
+                userRow.innerHTML = `
                     <div class="position-relative me-3">
-                        <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">
-                            ${initial}
-                        </div>
+                        <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; font-weight: bold;">${initial}</div>
                         <span class="status-dot online position-absolute bottom-0 end-0"></span>
                     </div>
                     <div class="flex-grow-1 overflow-hidden">
                         <div class="d-flex justify-content-between align-items-center">
-                            <h6 class="mb-0 fw-bold username-text text-truncate pe-2">${sender}</h6>
-                            <small class="text-muted last-msg-time flex-shrink-0">
-                                <span class="text-success small fw-normal">Online Now</span>
-                            </small>
+                            <h6 class="mb-0 fw-bold username-text text-truncate">${sender}</h6>
+                            <small class="text-muted last-msg-time"><span class="text-success small">Online</span></small>
                         </div>
                         <div class="d-flex justify-content-between align-items-center">
                             <div class="last-msg-container overflow-hidden w-100 me-2">
                                 <p class="mb-0 last-msg-content text-dark fw-bold small text-truncate">${message}</p>
                                 <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
                             </div>
-                            <div class="unread-badge-container flex-shrink-0">
-                                <span class="badge bg-primary rounded-pill small unread-count">1</span>
-                            </div>
+                            <div class="unread-badge-container"><span class="badge bg-primary rounded-pill small unread-count">1</span></div>
                         </div>
                     </div>
                 `;
-                listGroup.prepend(newRow);
-                userRow = newRow;
+                userList.prepend(userRow);
             } else {
                 const msgEl = userRow.querySelector('.last-msg-content');
                 msgEl.textContent = message;
-                msgEl.classList.remove('text-muted');
-                msgEl.classList.add('text-dark', 'fw-bold');
+                
+                // If not active chat, show unread
+                if (activeChatUsername !== sender) {
+                    msgEl.classList.add('text-dark', 'fw-bold');
+                    const badgeContainer = userRow.querySelector('.unread-badge-container');
+                    let badge = badgeContainer.querySelector('.unread-count');
+                    if (badge) {
+                        badge.textContent = parseInt(badge.textContent) + 1;
+                    } else {
+                        badgeContainer.innerHTML = `<span class="badge bg-primary rounded-pill small unread-count">1</span>`;
+                    }
+                }
                 
                 const timeEl = userRow.querySelector('.last-msg-time');
-                // Only update time if not currently showing "Online Now"
-                if (!timeEl.querySelector('.text-success')) {
-                    timeEl.textContent = time;
-                }
-
-                const badgeContainer = userRow.querySelector('.unread-badge-container');
-                let badge = badgeContainer.querySelector('.unread-count');
-                if (badge) {
-                    badge.textContent = parseInt(badge.textContent) + 1;
-                } else {
-                    badgeContainer.innerHTML = `<span class="badge bg-primary rounded-pill small unread-count">1</span>`;
-                }
-
-                listGroup.prepend(userRow);
+                if (!timeEl.querySelector('.text-success')) timeEl.textContent = time;
+                userList.prepend(userRow);
             }
         } else if (data.type === 'dashboard_typing') {
             const sender = data.sender_username;
-            const isTyping = data.is_typing;
-            const userRow = document.querySelector(`[data-username="${sender}"]`);
+            const userRow = document.querySelector(`.user-item[data-username="${sender}"]`);
             if (userRow) {
                 const msgEl = userRow.querySelector('.last-msg-content');
                 const typingEl = userRow.querySelector('.dashboard-typing-indicator');
-                if (isTyping) {
+                if (data.is_typing) {
                     msgEl.style.display = 'none';
                     typingEl.style.display = 'block';
                 } else {
@@ -263,18 +515,15 @@
                 }
             }
         } else if (data.type === 'user_status_update') {
-            const userRow = document.querySelector(`[data-username="${data.username}"]`);
+            const userRow = document.querySelector(`.user-item[data-username="${data.username}"]`);
             if (userRow) {
-                const statusDot = userRow.querySelector('.status-dot');
+                const dot = userRow.querySelector('.status-dot');
                 const timeEl = userRow.querySelector('.last-msg-time');
-                
                 if (data.is_online) {
-                    statusDot.classList.remove('offline');
-                    statusDot.classList.add('online');
-                    timeEl.innerHTML = '<span class="text-success small fw-normal">Online Now</span>';
+                    dot.className = 'status-dot online position-absolute bottom-0 end-0';
+                    timeEl.innerHTML = '<span class="text-success small">Online</span>';
                 } else {
-                    statusDot.classList.remove('online');
-                    statusDot.classList.add('offline');
+                    dot.className = 'status-dot offline position-absolute bottom-0 end-0';
                     const time = new Date(data.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
                     timeEl.textContent = time;
                 }

@@ -22,8 +22,12 @@ from django.templatetags.static import static as static_tag
 from django.urls import include, path
 from django.views.generic.base import RedirectView
 
-urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("favicon.ico", RedirectView.as_view(url=static_tag("chat.png"))),
-    path("", include("chat.urls")),
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+urlpatterns = (
+    [
+        path("admin/", admin.site.urls),
+        path("favicon.ico", RedirectView.as_view(url=static_tag("chat.png"))),
+        path("", include("chat.urls")),
+    ]
+    + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    + static(settings.STATIC_URL, document_root=settings.STATICFILES_DIRS[0])
+)

@@ -109,7 +109,7 @@
     </nav>
 
     <div class="main-content">
-        <div class="container-fluid px-md-4">
+        <div class="container-fluid h-100 {% if request.resolver_match.url_name != 'user_list' %}px-md-4{% else %}p-0{% endif %}">
             {% block content %}{% endblock %}
         </div>
     </div>

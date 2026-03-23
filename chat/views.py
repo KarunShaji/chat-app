@@ -116,3 +116,43 @@ def chat_detail(request, username):
     return render(
         request, "chat.html", {"other_user": other_user, "chat_messages": messages}
     )
+
+
+@login_required
+def chat_messages_api(request, username):
+    other_user = CustomUser.objects.get(username=username)
+    messages = Message.objects.filter(
+        (Q(sender=request.user) & Q(receiver=other_user))
+        | (Q(sender=other_user) & Q(receiver=request.user))
+    ).order_by("timestamp")
+
+    # Mark as read
+    Message.objects.filter(
+        sender=other_user, receiver=request.user, is_read=False
+    ).update(is_read=True)
+
+    msg_list = []
+    for m in messages:
+        msg_list.append(
+            {
+                "sender": m.sender.username,
+                "content": m.content,
+                "timestamp": m.timestamp.isoformat(),
+                "is_read": m.is_read,
+                "is_delivered": m.is_delivered,
+            }
+        )
+
+    return JsonResponse(
+        {
+            "messages": msg_list,
+            "other_user": {
+                "username": other_user.username,
+                "is_online": other_user.is_online,
+                "last_seen": (
+                    other_user.last_seen.isoformat() if other_user.last_seen else None
+                ),
+                "initial": other_user.username[0].upper(),
+            },
+        }
+    )

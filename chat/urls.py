@@ -11,5 +11,10 @@ urlpatterns = [
     path("logout/", auth_views.LogoutView.as_view(next_page="login"), name="logout"),
     path("", views.UserListView.as_view(), name="user_list"),
     path("chat/<str:username>/", views.chat_detail, name="chat_detail"),
+    path(
+        "api/messages/<str:username>/",
+        views.chat_messages_api,
+        name="chat_messages_api",
+    ),
     path("api/users/search/", views.user_search_api, name="user_search_api"),
 ]
