@@ -29,7 +29,7 @@
 </style>
 
 <div class="row justify-content-center">
-    <div class="col-md-8">
+    <div class="col-md-10 col-lg-8">
         <div class="card shadow-sm">
             <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -59,10 +59,10 @@
                                 </div>
                                 <span class="status-dot {% if u.is_online %}online{% else %}offline{% endif %} position-absolute bottom-0 end-0"></span>
                             </div>
-                            <div class="flex-grow-1">
+                            <div class="flex-grow-1 overflow-hidden">
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <h6 class="mb-0 fw-bold username-text">{{ u.username }}</h6>
-                                    <small class="text-muted last-msg-time">
+                                    <h6 class="mb-0 fw-bold username-text text-truncate pe-2">{{ u.username }}</h6>
+                                    <small class="text-muted last-msg-time flex-shrink-0">
                                         {% if u.is_online %}
                                             <span class="text-success small fw-normal">Online Now</span>
                                         {% elif u.last_msg_time %}
@@ -73,8 +73,8 @@
                                     </small>
                                 </div>
                                 <div class="d-flex justify-content-between align-items-center">
-                                    <div class="last-msg-container">
-                                        <p class="mb-0 last-msg-content {% if u.unread_count %}text-dark fw-bold{% else %}text-muted{% endif %} small text-truncate" style="max-width: 250px;">
+                                    <div class="last-msg-container overflow-hidden w-100 me-2">
+                                        <p class="mb-0 last-msg-content {% if u.unread_count %}text-dark fw-bold{% else %}text-muted{% endif %} small text-truncate">
                                             {% if u.last_msg %}
                                                 {{ u.last_msg }}
                                             {% else %}
@@ -83,7 +83,7 @@
                                         </p>
                                         <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
                                     </div>
-                                    <div class="unread-badge-container">
+                                    <div class="unread-badge-container flex-shrink-0">
                                         {% if u.unread_count %}
                                             <span class="badge bg-primary rounded-pill small unread-count">{{ u.unread_count }}</span>
                                         {% endif %}
@@ -92,7 +92,7 @@
                             </div>
                         </a>
                     {% empty %}
-                        <div class="text-center py-5">
+                        <div id="no-chats-msg" class="text-center py-5">
                             <p class="text-muted">No recent chats. Search for someone above!</p>
                         </div>
                     {% endfor %}
@@ -108,6 +108,8 @@
     const searchInput = document.getElementById('user-search-input');
     const resultsBox = document.getElementById('search-results-box');
     const userItems = document.querySelectorAll('.user-item');
+    const listGroup = document.getElementById('user-list');
+    const noChatsMsg = document.getElementById('no-chats-msg');
 
     let searchTimeout;
     searchInput.addEventListener('input', () => {
@@ -115,7 +117,8 @@
         const query = searchInput.value.toLowerCase().trim();
         
         // 1. Filter existing (Recent Chats) list instantly
-        userItems.forEach(item => {
+        const currentUserItems = document.querySelectorAll('.user-item');
+        currentUserItems.forEach(item => {
             const username = item.getAttribute('data-username').toLowerCase();
             if (username.includes(query)) {
                 item.style.setProperty('display', 'flex', 'important');
@@ -181,16 +184,55 @@
         if (data.type === 'dashboard_update') {
             const sender = data.sender_username;
             const message = data.message;
+            const initial = data.sender_initial;
             const time = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
 
-            const userRow = document.querySelector(`[data-username="${sender}"]`);
-            if (userRow) {
+            let userRow = document.querySelector(`[data-username="${sender}"]`);
+            
+            if (!userRow) {
+                // Remove "No recent chats" if it exists
+                if (noChatsMsg) noChatsMsg.remove();
+
+                // Create new row
+                const newRow = document.createElement('a');
+                newRow.href = `/chat/${sender}/`;
+                newRow.className = 'list-group-item list-group-item-action user-item border-0 py-3 px-4 d-flex align-items-center';
+                newRow.setAttribute('data-username', sender);
+                newRow.innerHTML = `
+                    <div class="position-relative me-3">
+                        <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">
+                            ${initial}
+                        </div>
+                        <span class="status-dot online position-absolute bottom-0 end-0"></span>
+                    </div>
+                    <div class="flex-grow-1 overflow-hidden">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 fw-bold username-text text-truncate pe-2">${sender}</h6>
+                            <small class="text-muted last-msg-time flex-shrink-0">
+                                <span class="text-success small fw-normal">Online Now</span>
+                            </small>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="last-msg-container overflow-hidden w-100 me-2">
+                                <p class="mb-0 last-msg-content text-dark fw-bold small text-truncate">${message}</p>
+                                <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
+                            </div>
+                            <div class="unread-badge-container flex-shrink-0">
+                                <span class="badge bg-primary rounded-pill small unread-count">1</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                listGroup.prepend(newRow);
+                userRow = newRow;
+            } else {
                 const msgEl = userRow.querySelector('.last-msg-content');
                 msgEl.textContent = message;
                 msgEl.classList.remove('text-muted');
                 msgEl.classList.add('text-dark', 'fw-bold');
                 
                 const timeEl = userRow.querySelector('.last-msg-time');
+                // Only update time if not currently showing "Online Now"
                 if (!timeEl.querySelector('.text-success')) {
                     timeEl.textContent = time;
                 }
@@ -203,7 +245,6 @@
                     badgeContainer.innerHTML = `<span class="badge bg-primary rounded-pill small unread-count">1</span>`;
                 }
 
-                const listGroup = document.getElementById('user-list');
                 listGroup.prepend(userRow);
             }
         } else if (data.type === 'dashboard_typing') {

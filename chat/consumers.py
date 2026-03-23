@@ -143,6 +143,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     {
                         "type": "dashboard_update",
                         "sender_username": self.user.username,
+                        "sender_initial": self.user.username[0].upper(),
                         "message": message_content,
                         "timestamp": message_obj.timestamp.isoformat(),
                         "is_delivered": message_obj.is_delivered,
