@@ -11,6 +11,13 @@ from .forms import CustomUserCreationForm
 from .models import CustomUser, Message
 
 
+def get_chat_partner_or_404(request_user, username):
+    return get_object_or_404(
+        CustomUser.objects.exclude(id=request_user.id).exclude(is_superuser=True),
+        username=username,
+    )
+
+
 class RegisterView(CreateView):
     form_class = CustomUserCreationForm
     template_name = "register.html"
@@ -102,7 +109,7 @@ def user_search_api(request):
 
 @login_required
 def chat_detail(request, username):
-    other_user = get_object_or_404(CustomUser, username=username)
+    other_user = get_chat_partner_or_404(request.user, username)
     messages = Message.objects.filter(
         (Q(sender=request.user) & Q(receiver=other_user))
         | (Q(sender=other_user) & Q(receiver=request.user))
@@ -120,7 +127,7 @@ def chat_detail(request, username):
 
 @login_required
 def chat_messages_api(request, username):
-    other_user = get_object_or_404(CustomUser, username=username)
+    other_user = get_chat_partner_or_404(request.user, username)
     messages = Message.objects.filter(
         (Q(sender=request.user) & Q(receiver=other_user))
         | (Q(sender=other_user) & Q(receiver=request.user))

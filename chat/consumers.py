@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 
 from .models import Message
-from .services import PresenceService
+from .services import MessageIdempotencyConflict, MessageService, PresenceService
 
 User = get_user_model()
 
@@ -46,6 +46,24 @@ class PresenceConsumerMixin:
     def broadcast_user_status(self, is_online, last_seen):
         PresenceService.broadcast_status(self.user.username, is_online, last_seen)
 
+    async def send_error(self, detail, code="bad_request"):
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": "error",
+                    "code": code,
+                    "detail": detail,
+                }
+            )
+        )
+
+    def parse_boolean(self, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
 
 class DashboardConsumer(PresenceConsumerMixin, AsyncWebsocketConsumer):
     async def connect(self):
@@ -73,9 +91,18 @@ class DashboardConsumer(PresenceConsumerMixin, AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps(event))
 
     async def receive(self, text_data):
-        data = json.loads(text_data)
+        try:
+            data = json.loads(text_data)
+        except json.JSONDecodeError:
+            await self.send_error("Invalid JSON payload.", code="invalid_json")
+            return
+
         if data.get("type") == "ping":
             await self.send(text_data=json.dumps({"type": "pong"}))
+        else:
+            await self.send_error(
+                "Unsupported dashboard event type.", code="unsupported_type"
+            )
 
 
 class ChatConsumer(PresenceConsumerMixin, AsyncWebsocketConsumer):
@@ -121,53 +148,79 @@ class ChatConsumer(PresenceConsumerMixin, AsyncWebsocketConsumer):
         await self.remove_presence_groups(include_dashboard_group=False)
 
     async def receive(self, text_data):
-        data = json.loads(text_data)
+        try:
+            data = json.loads(text_data)
+        except json.JSONDecodeError:
+            await self.send_error("Invalid JSON payload.", code="invalid_json")
+            return
+
         message_type = data.get("type", "chat_message")
 
         if message_type == "chat_message":
-            message_content = data.get("message", "").strip()
+            raw_message = data.get("message", "")
+            if not isinstance(raw_message, str):
+                await self.send_error(
+                    "Message must be a string.", code="invalid_message"
+                )
+                return
+
+            message_content = raw_message.strip()
             client_id = data.get("client_id")
 
             if message_content:
-                message_obj = await self.save_message(
-                    self.user, self.other_user, message_content, client_id
-                )
+                try:
+                    message_obj, created = await self.save_message(
+                        self.user, self.other_user, message_content, client_id
+                    )
+                except MessageIdempotencyConflict as exc:
+                    await self.send_error(str(exc), code="client_id_conflict")
+                    return
 
                 payload = {
                     "type": "chat_message",
                     "id": str(message_obj.public_id),
                     "client_id": message_obj.client_id,
-                    "message": message_content,
+                    "message": message_obj.content,
                     "sender": self.user.username,
                     "timestamp": message_obj.timestamp.isoformat(),
                     "is_delivered": message_obj.is_delivered,
                     "is_read": message_obj.is_read,
                 }
-                await self.channel_layer.group_send(self.room_group_name, payload)
 
-                # Notify recipient's dashboard
-                dashboard_group = f"user_dashboard_{self.other_user.id}"
-                await self.channel_layer.group_send(
-                    dashboard_group,
-                    {
-                        "type": "dashboard_update",
-                        "sender_username": self.user.username,
-                        "sender_initial": self.user.username[0].upper(),
-                        "message": message_content,
-                        "timestamp": message_obj.timestamp.isoformat(),
-                        "is_delivered": message_obj.is_delivered,
-                        "is_read": message_obj.is_read,
-                    },
+                if created:
+                    await self.channel_layer.group_send(self.room_group_name, payload)
+
+                    # Notify recipient's dashboard
+                    dashboard_group = f"user_dashboard_{self.other_user.id}"
+                    await self.channel_layer.group_send(
+                        dashboard_group,
+                        {
+                            "type": "dashboard_update",
+                            "sender_username": self.user.username,
+                            "sender_initial": self.user.username[0].upper(),
+                            "message": message_obj.content,
+                            "timestamp": message_obj.timestamp.isoformat(),
+                            "is_delivered": message_obj.is_delivered,
+                            "is_read": message_obj.is_read,
+                        },
+                    )
+                else:
+                    await self.send(text_data=json.dumps(payload))
+            else:
+                await self.send_error(
+                    "Message content cannot be empty.",
+                    code="empty_message",
                 )
 
         elif message_type == "typing":
+            is_typing = self.parse_boolean(data.get("is_typing", False))
             # Chat room typing
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     "type": "user_typing",
                     "sender": self.user.username,
-                    "is_typing": data.get("is_typing", False),
+                    "is_typing": is_typing,
                 },
             )
             # Dashboard typing for recipient
@@ -177,11 +230,15 @@ class ChatConsumer(PresenceConsumerMixin, AsyncWebsocketConsumer):
                 {
                     "type": "dashboard_typing",
                     "sender_username": self.user.username,
-                    "is_typing": data.get("is_typing", False),
+                    "is_typing": is_typing,
                 },
             )
         elif message_type == "ping":
             await self.send(text_data=json.dumps({"type": "pong"}))
+        else:
+            await self.send_error(
+                "Unsupported chat event type.", code="unsupported_type"
+            )
 
     async def chat_message(self, event):
         if self.user.username != event["sender"]:
@@ -210,29 +267,31 @@ class ChatConsumer(PresenceConsumerMixin, AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_user(self, username):
-        return User.objects.get(username=username)
+        return (
+            User.objects.exclude(id=self.user.id)
+            .exclude(is_superuser=True)
+            .get(username=username)
+        )
 
     @database_sync_to_async
     def save_message(self, sender, receiver, content, client_id):
-        if client_id:
-            message, _ = Message.objects.get_or_create(
-                sender=sender,
-                client_id=client_id,
-                defaults={
-                    "receiver": receiver,
-                    "content": content,
-                },
-            )
-            return message
-        return Message.objects.create(
+        return MessageService.create_or_get_message(
             sender=sender,
             receiver=receiver,
             content=content,
+            client_id=client_id,
         )
 
     @database_sync_to_async
     def mark_message_read(self, public_id):
-        message = Message.objects.get(public_id=public_id)
+        try:
+            message = Message.objects.get(public_id=public_id)
+        except Message.DoesNotExist:
+            return {
+                "type": "read_receipt",
+                "reader": self.user.username,
+                "message_ids": [],
+            }
         if message.receiver_id != self.user.id:
             return {
                 "type": "read_receipt",
