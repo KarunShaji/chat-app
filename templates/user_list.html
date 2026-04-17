@@ -2,10 +2,9 @@
 {% block title %}Recent Chats - Chat App{% endblock %}
 {% block content %}
 <style>
-    /* Desktop layout overrides */
     .main-content { height: calc(100vh - 56px); overflow: hidden; }
     .row.g-0.h-100 { height: 100%; overflow: hidden; }
-    
+
     #dashboard-col {
         height: 100%;
         display: flex;
@@ -25,7 +24,7 @@
 
     .list-group-item { border: none !important; border-bottom: 1px solid var(--border-color) !important; margin-bottom: 0 !important; }
     .list-group-item.active-chat { background-color: var(--input-bg); border-left: 4px solid var(--primary-green) !important; }
-    
+
     #search-results-box {
         position: absolute;
         top: 100%;
@@ -41,7 +40,18 @@
         overflow-y: auto;
     }
 
-    /* Chat Area Styling */
+    .search-result-item {
+        display: flex;
+        align-items: center;
+        padding: 0.9rem 1rem;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .search-result-item:hover {
+        background: var(--input-bg);
+    }
+
     #chat-placeholder {
         display: flex;
         flex-direction: column;
@@ -60,23 +70,22 @@
         height: 100%;
     }
 
-    .chat-box { 
-        flex: 1; 
-        overflow-y: auto; 
-        padding: 20px; 
-        background-color: var(--chat-bg); 
+    .chat-box {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        background-color: var(--chat-bg);
         display: flex;
         flex-direction: column;
     }
 
-    .message { margin-bottom: 15px; padding: 10px 16px; border-radius: 18px; max-width: 75%; font-size: 0.95rem; line-height: 1.4; position: relative; box-shadow: 0 1px 0.5px rgba(0,0,0,0.13); }
+    .message { margin-bottom: 15px; padding: 10px 16px; border-radius: 18px; max-width: 75%; font-size: 0.95rem; line-height: 1.4; position: relative; box-shadow: 0 1px 0.5px rgba(0,0,0,0.13); white-space: pre-wrap; word-break: break-word; }
     .sent { align-self: flex-end; background-color: var(--msg-sent-bg); color: var(--msg-sent-text); border-bottom-right-radius: 4px; }
     .received { align-self: flex-start; background-color: var(--msg-received-bg); color: var(--msg-received-text); border-bottom-left-radius: 4px; }
     .timestamp { font-size: 0.75rem; opacity: 0.8; display: block; margin-top: 4px; }
     .read-status { margin-left: 4px; font-weight: bold; }
     .status-seen { color: #34b7f1 !important; }
 
-    /* Typing Animation */
     .typing-dots span {
         width: 6px; height: 6px; margin: 0 1px;
         background-color: var(--primary-green); border-radius: 50%;
@@ -97,7 +106,6 @@
 </style>
 
 <div class="row g-0 h-100">
-    <!-- Left Column: User List (25% on desktop, 100% on mobile) -->
     <div id="dashboard-col" class="col-12 col-md-4 col-lg-3">
         <div class="p-3 border-bottom bg-white sticky-top" style="z-index: 20;">
             <h4 class="fw-bold mb-3">Chats</h4>
@@ -159,7 +167,6 @@
         </div>
     </div>
 
-    <!-- Right Column: Chat (75% on desktop, hidden on mobile) -->
     <div id="chat-col" class="col-md-8 col-lg-9 d-none d-md-flex">
         <div id="chat-placeholder">
             <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" fill="currentColor" class="bi bi-chat-dots-fill mb-3" viewBox="0 0 16 16">
@@ -170,7 +177,6 @@
         </div>
 
         <div id="active-chat-container">
-            <!-- Header -->
             <div class="p-3 border-bottom bg-white d-flex align-items-center justify-content-between" style="z-index: 20;">
                 <div class="d-flex align-items-center">
                     <div class="position-relative me-3">
@@ -184,12 +190,8 @@
                 </div>
             </div>
 
-            <!-- Messages -->
-            <div class="chat-box" id="chat-box">
-                <!-- Messages load here -->
-            </div>
+            <div class="chat-box" id="chat-box"></div>
 
-            <!-- Footer/Input -->
             <div class="p-3 bg-white border-top">
                 <div class="input-group">
                     <input type="text" id="chat-input" class="form-control border-0 bg-light py-2 px-3 rounded-pill me-2" placeholder="Type a message..." autocomplete="off">
@@ -207,328 +209,654 @@
 
 {% block extra_js %}
 <script>
-    const searchInput = document.getElementById('user-search-input');
-    const resultsBox = document.getElementById('search-results-box');
-    const userList = document.getElementById('user-list');
-    const noChatsMsg = document.getElementById('no-chats-msg');
-    const chatPlaceholder = document.getElementById('chat-placeholder');
-    const activeChatContainer = document.getElementById('active-chat-container');
-    const chatBox = document.getElementById('chat-box');
-    const chatInput = document.getElementById('chat-input');
-    const chatSubmit = document.getElementById('chat-submit');
-    
+    const CURRENT_USERNAME = "{{ user.username|escapejs }}";
+    const SOCKET_PROTOCOL = window.location.protocol === "https:" ? "wss" : "ws";
+    const searchInput = document.getElementById("user-search-input");
+    const resultsBox = document.getElementById("search-results-box");
+    const userList = document.getElementById("user-list");
+    const noChatsMsg = document.getElementById("no-chats-msg");
+    const chatPlaceholder = document.getElementById("chat-placeholder");
+    const activeChatContainer = document.getElementById("active-chat-container");
+    const chatBox = document.getElementById("chat-box");
+    const chatInput = document.getElementById("chat-input");
+    const chatSubmit = document.getElementById("chat-submit");
+
     let activeChatUsername = null;
     let chatSocket = null;
-    let typingTimeout;
+    let dashboardSocket = null;
+    let chatReconnectAttempts = 0;
+    let dashboardReconnectAttempts = 0;
+    let chatReconnectTimer = null;
+    let dashboardReconnectTimer = null;
+    let chatHeartbeatTimer = null;
+    let dashboardHeartbeatTimer = null;
+    let searchTimer = null;
+    let typingTimer = null;
+    let incomingTypingTimer = null;
+    let chatRefreshTimer = null;
+    let ignoreNextChatClose = false;
 
-    // Search logic
-    searchInput.addEventListener('input', () => {
-        const query = searchInput.value.toLowerCase().trim();
-        
-        // Filter list
-        document.querySelectorAll('.user-item').forEach(item => {
-            const username = item.getAttribute('data-username').toLowerCase();
-            item.style.display = username.includes(query) ? 'flex' : 'none';
+    const knownMessageIds = new Set();
+    const queuedMessages = [];
+    const pendingMessages = new Map();
+
+    function createClientId() {
+        if (window.crypto && window.crypto.randomUUID) {
+            return window.crypto.randomUUID();
+        }
+        return `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function escapeHtml(value) {
+        return (value || "").replace(/[&<>"']/g, char => ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            "\"": "&quot;",
+            "'": "&#39;"
+        }[char]));
+    }
+
+    function formatTime(timestamp) {
+        return new Date(timestamp).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true
         });
+    }
 
-        if (query.length < 1) {
-            resultsBox.style.display = 'none';
+    function messageStatus(isRead, isDelivered) {
+        if (isRead) {
+            return { ticks: "\u2713\u2713", className: "status-seen" };
+        }
+        if (isDelivered) {
+            return { ticks: "\u2713\u2713", className: "" };
+        }
+        return { ticks: "\u2713", className: "" };
+    }
+
+    function ensureTypingBubble() {
+        let bubble = document.getElementById("typing-bubble");
+        if (!bubble) {
+            bubble = document.createElement("div");
+            bubble.id = "typing-bubble";
+            bubble.className = "message received d-none";
+            bubble.style.opacity = "0.8";
+            bubble.style.padding = "5px 15px";
+            bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+            chatBox.appendChild(bubble);
+        }
+        return bubble;
+    }
+
+    function setChatStatus(user) {
+        const statusDot = document.getElementById("active-chat-status-dot");
+        const statusText = document.getElementById("active-chat-status-text");
+
+        if (user.is_online) {
+            statusDot.className = "status-dot online position-absolute bottom-0 end-0";
+            statusText.textContent = "Online now";
             return;
         }
 
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(async () => {
-            const response = await fetch(`/api/users/search/?q=${encodeURIComponent(query)}`);
-            const data = await response.json();
-            
-            if (data.users.length > 0) {
-                resultsBox.innerHTML = data.users.map(u => `
-                    <a href="#" class="search-result-item" onclick="openChatFromSearch('${u.username}'); return false;">
-                        <div class="position-relative me-3">
-                            <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-weight: bold;">
-                                ${u.initial}
-                            </div>
-                            <span class="status-dot ${u.is_online ? 'online' : 'offline'} position-absolute bottom-0 end-0"></span>
-                        </div>
-                        <div>
-                            <div class="fw-bold">${u.full_name}</div>
-                            <small class="text-muted">@${u.username}</small>
-                        </div>
-                    </a>
-                `).join('');
-                resultsBox.style.display = 'block';
-            } else {
-                resultsBox.innerHTML = '<div class="p-3 text-center text-muted">No people found</div>';
-                resultsBox.style.display = 'block';
-            }
-        }, 300);
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!searchInput.contains(e.target) && !resultsBox.contains(e.target)) {
-            resultsBox.style.display = 'none';
-        }
-    });
-
-    // Handle clicks on user list
-    userList.addEventListener('click', function(e) {
-        const userItem = e.target.closest('.user-item');
-        if (userItem && window.innerWidth >= 768) {
-            e.preventDefault();
-            const username = userItem.getAttribute('data-username');
-            openChat(username);
-        }
-    });
-
-    function openChatFromSearch(username) {
-        resultsBox.style.display = 'none';
-        searchInput.value = '';
-        // Unhide all items in case they were filtered
-        document.querySelectorAll('.user-item').forEach(i => i.style.display = 'flex');
-        openChat(username);
+        statusDot.className = "status-dot offline position-absolute bottom-0 end-0";
+        statusText.textContent = user.last_seen ? `Last seen: ${formatTime(user.last_seen)}` : "Offline";
     }
 
-    async function openChat(username) {
-        if (activeChatUsername === username) return;
+    function getUserRow(username) {
+        return document.querySelector(`.user-item[data-username="${username}"]`);
+    }
 
-        // Highlight active chat in list
-        document.querySelectorAll('.user-item').forEach(i => i.classList.remove('active-chat'));
-        const listRow = document.querySelector(`.user-item[data-username="${username}"]`);
-        if (listRow) {
-            listRow.classList.add('active-chat');
-            // Clear unread badge
-            const badge = listRow.querySelector('.unread-badge-container');
-            if (badge) badge.innerHTML = '';
-            const msgContent = listRow.querySelector('.last-msg-content');
-            if (msgContent) msgContent.classList.remove('fw-bold', 'text-dark');
-        }
-
-        activeChatUsername = username;
-        chatPlaceholder.style.display = 'none';
-        activeChatContainer.style.display = 'flex';
-        chatBox.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
-
-        // Disconnect old socket
-        if (chatSocket) {
-            chatSocket.close();
-        }
-
-        try {
-            const response = await fetch(`/api/messages/${username}/`);
-            const data = await response.json();
-            
-            // Update Header
-            document.getElementById('active-chat-username').textContent = data.other_user.username;
-            document.getElementById('active-chat-avatar').textContent = data.other_user.initial;
-            const statusDot = document.getElementById('active-chat-status-dot');
-            const statusText = document.getElementById('active-chat-status-text');
-            
-            if (data.other_user.is_online) {
-                statusDot.className = 'status-dot online position-absolute bottom-0 end-0';
-                statusText.textContent = 'Online Now';
-            } else {
-                statusDot.className = 'status-dot offline position-absolute bottom-0 end-0';
-                const time = data.other_user.last_seen ? new Date(data.other_user.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'offline';
-                statusText.textContent = `Last seen: ${time}`;
-            }
-
-            // Render Messages
-            chatBox.innerHTML = '';
-            data.messages.forEach(msg => {
-                appendMessage(msg.sender, msg.content, msg.timestamp, msg.is_read, msg.is_delivered);
-            });
-            chatBox.innerHTML += `<div id="typing-bubble" class="message received d-none" style="opacity: 0.8; padding: 5px 15px;"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
-            scrollToBottom();
-
-            // Connect WebSocket
-            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-            chatSocket = new WebSocket(`${protocol}://${window.location.host}/ws/chat/${username}/`);
-
-            chatSocket.onmessage = function(e) {
-                const wsData = JSON.parse(e.data);
-                if (wsData.type === 'chat_message') {
-                    appendMessage(wsData.sender, wsData.message, wsData.timestamp, wsData.is_read, wsData.is_delivered);
-                    scrollToBottom();
-                } else if (wsData.type === 'typing') {
-                    const bubble = document.getElementById('typing-bubble');
-                    if (wsData.is_typing) {
-                        bubble.classList.remove('d-none');
-                        scrollToBottom();
-                    } else {
-                        bubble.classList.add('d-none');
-                    }
-                } else if (wsData.type === 'read_receipt') {
-                    document.querySelectorAll('.sent .read-status').forEach(span => {
-                        span.textContent = '✓✓';
-                        span.classList.add('status-seen');
-                    });
-                } else if (wsData.type === 'user_status_update') {
-                    if (wsData.username === activeChatUsername) {
-                        const sDot = document.getElementById('active-chat-status-dot');
-                        const sText = document.getElementById('active-chat-status-text');
-                        if (wsData.is_online) {
-                            sDot.className = 'status-dot online position-absolute bottom-0 end-0';
-                            sText.textContent = 'Online Now';
-                        } else {
-                            sDot.className = 'status-dot offline position-absolute bottom-0 end-0';
-                            const time = new Date(wsData.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-                            sText.textContent = `Last seen: ${time}`;
-                        }
-                    }
-                }
-            };
-
-        } catch (error) {
-            console.error('Error loading chat:', error);
-            chatBox.innerHTML = '<div class="text-center py-5 text-danger">Error loading conversation.</div>';
+    function moveUserRowToTop(row) {
+        if (row) {
+            userList.prepend(row);
         }
     }
 
-    function appendMessage(sender, content, timestamp, isRead, isDelivered) {
-        const bubble = document.getElementById('typing-bubble');
-        const messageDiv = document.createElement('div');
-        const isSelf = sender === "{{ user.username }}";
-        messageDiv.className = `message ${isSelf ? 'sent' : 'received'}`;
-        
-        const localTime = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-        
-        let statusTicks = '✓';
-        let statusClass = '';
-        if (isRead) {
-            statusTicks = '✓✓';
-            statusClass = 'status-seen';
-        } else if (isDelivered) {
-            statusTicks = '✓✓';
+    function updateUserRow(username, options = {}) {
+        const {
+            message = "Start chatting...",
+            timestamp = null,
+            isOnline = null,
+            incrementUnread = false,
+            isTyping = false,
+            initial = username.charAt(0).toUpperCase(),
+            allowCreate = false
+        } = options;
+
+        let row = getUserRow(username);
+        if (!row) {
+            if (!allowCreate) {
+                return;
+            }
+            if (noChatsMsg) {
+                noChatsMsg.remove();
+            }
+            row = document.createElement("a");
+            row.href = `/chat/${username}/`;
+            row.className = "list-group-item list-group-item-action user-item py-3 px-3 d-flex align-items-center";
+            row.dataset.username = username;
+            row.innerHTML = `
+                <div class="position-relative me-3">
+                    <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; font-weight: bold;">
+                        ${escapeHtml(initial)}
+                    </div>
+                    <span class="status-dot offline position-absolute bottom-0 end-0"></span>
+                </div>
+                <div class="flex-grow-1 overflow-hidden">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 fw-bold username-text text-truncate">${escapeHtml(username)}</h6>
+                        <small class="text-muted last-msg-time"></small>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="last-msg-container overflow-hidden w-100 me-2">
+                            <p class="mb-0 last-msg-content text-muted small text-truncate"></p>
+                            <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
+                        </div>
+                        <div class="unread-badge-container"></div>
+                    </div>
+                </div>
+            `;
         }
-        
-        let statusHtml = isSelf ? `<span class="read-status text-white ${statusClass}">${statusTicks}</span>` : '';
-        messageDiv.innerHTML = `${content}<span class="timestamp">${localTime} ${statusHtml}</span>`;
-        
-        if (bubble) {
-            chatBox.insertBefore(messageDiv, bubble);
+
+        const messageElement = row.querySelector(".last-msg-content");
+        const typingElement = row.querySelector(".dashboard-typing-indicator");
+        const badgeContainer = row.querySelector(".unread-badge-container");
+        const timeElement = row.querySelector(".last-msg-time");
+        const statusDot = row.querySelector(".status-dot");
+
+        messageElement.textContent = message;
+        messageElement.style.display = isTyping ? "none" : "block";
+        typingElement.style.display = isTyping ? "block" : "none";
+
+        if (incrementUnread && activeChatUsername !== username) {
+            messageElement.classList.add("text-dark", "fw-bold");
+            const unreadBadge = badgeContainer.querySelector(".unread-count");
+            if (unreadBadge) {
+                unreadBadge.textContent = String(parseInt(unreadBadge.textContent, 10) + 1);
+            } else {
+                badgeContainer.innerHTML = '<span class="badge bg-primary rounded-pill small unread-count">1</span>';
+            }
+        }
+
+        if (activeChatUsername === username) {
+            badgeContainer.innerHTML = "";
+            messageElement.classList.remove("text-dark", "fw-bold");
+        }
+
+        if (isOnline === true) {
+            statusDot.className = "status-dot online position-absolute bottom-0 end-0";
+            timeElement.innerHTML = '<span class="text-success small">Online</span>';
+        } else if (isOnline === false) {
+            statusDot.className = "status-dot offline position-absolute bottom-0 end-0";
+            timeElement.textContent = timestamp ? formatTime(timestamp) : "";
+        } else if (timestamp && !timeElement.querySelector(".text-success")) {
+            timeElement.textContent = formatTime(timestamp);
+        }
+
+        moveUserRowToTop(row);
+    }
+
+    function appendMessage(message, optimistic = false) {
+        const messageContent = message.content ?? message.message ?? "";
+
+        if (!optimistic && knownMessageIds.has(message.id)) {
+            return;
+        }
+
+        const bubble = ensureTypingBubble();
+        const isSelf = message.sender === CURRENT_USERNAME;
+        const status = messageStatus(message.is_read, message.is_delivered);
+        const messageDiv = document.createElement("div");
+        const renderedId = optimistic ? `pending-${message.client_id}` : message.id;
+
+        if (!optimistic && message.client_id && pendingMessages.has(message.client_id)) {
+            const pendingNode = pendingMessages.get(message.client_id);
+            pendingMessages.delete(message.client_id);
+            pendingNode.dataset.messageId = message.id;
+            pendingNode.classList.remove("opacity-75");
+            const timestampNode = pendingNode.querySelector(".timestamp");
+            const readStatusNode = pendingNode.querySelector(".read-status");
+            timestampNode.firstChild.textContent = `${formatTime(message.timestamp)} `;
+            if (readStatusNode) {
+                readStatusNode.textContent = status.ticks;
+                readStatusNode.className = `read-status text-white ${status.className}`.trim();
+            }
+            knownMessageIds.add(message.id);
+            return;
+        }
+
+        messageDiv.className = `message ${isSelf ? "sent" : "received"}${optimistic ? " opacity-75" : ""}`;
+        messageDiv.dataset.messageId = renderedId;
+        if (message.client_id) {
+            messageDiv.dataset.clientId = message.client_id;
+        }
+
+        const statusHtml = isSelf
+            ? `<span class="read-status text-white ${status.className}">${status.ticks}</span>`
+            : "";
+        messageDiv.innerHTML = `${escapeHtml(messageContent)}<span class="timestamp">${formatTime(message.timestamp)} ${statusHtml}</span>`;
+
+        chatBox.insertBefore(messageDiv, bubble);
+
+        if (optimistic) {
+            pendingMessages.set(message.client_id, messageDiv);
         } else {
-            chatBox.appendChild(messageDiv);
+            knownMessageIds.add(message.id);
         }
     }
 
-    function sendMessage() {
-        const msg = chatInput.value.trim();
-        if (msg && chatSocket && chatSocket.readyState === WebSocket.OPEN) {
-            chatSocket.send(JSON.stringify({'type': 'chat_message', 'message': msg}));
-            chatInput.value = '';
-            sendTypingStatus(false);
-        }
-    }
-
-    chatSubmit.onclick = sendMessage;
-    chatInput.onkeyup = e => { if (e.keyCode === 13) sendMessage(); };
-    chatInput.oninput = () => {
-        sendTypingStatus(true);
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => sendTypingStatus(false), 2000);
-    };
-
-    function sendTypingStatus(isTyping) {
-        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
-            chatSocket.send(JSON.stringify({'type': 'typing', 'is_typing': isTyping}));
-        }
+    function updateReadReceipts(messageIds) {
+        messageIds.forEach(messageId => {
+            const statusNode = chatBox.querySelector(`[data-message-id="${messageId}"] .read-status`);
+            if (statusNode) {
+                statusNode.textContent = "\u2713\u2713";
+                statusNode.classList.add("status-seen");
+            }
+        });
     }
 
     function scrollToBottom() {
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // DASHBOARD SOCKET (Remains for user list updates)
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const dashboardSocket = new WebSocket(`${protocol}://${window.location.host}/ws/dashboard/`);
+    function showTypingBubble() {
+        const bubble = ensureTypingBubble();
+        bubble.classList.remove("d-none");
+        scrollToBottom();
+    }
 
-    dashboardSocket.onmessage = function(e) {
-        const data = JSON.parse(e.data);
-        if (data.type === 'dashboard_update') {
-            const sender = data.sender_username;
-            const message = data.message;
-            const initial = data.sender_initial;
-            const time = new Date(data.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    function hideTypingBubble() {
+        const bubble = ensureTypingBubble();
+        bubble.classList.add("d-none");
+    }
 
-            // If it's the active chat, the chatSocket will handle the message append.
-            // But we still update the user list row.
-            
-            let userRow = document.querySelector(`.user-item[data-username="${sender}"]`);
-            if (!userRow) {
-                if (noChatsMsg) noChatsMsg.remove();
-                userRow = document.createElement('a');
-                userRow.href = `/chat/${sender}/`;
-                userRow.className = 'list-group-item list-group-item-action user-item py-3 px-3 d-flex align-items-center';
-                userRow.setAttribute('data-username', sender);
-                userRow.innerHTML = `
-                    <div class="position-relative me-3">
-                        <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 48px; height: 48px; font-weight: bold;">${initial}</div>
-                        <span class="status-dot online position-absolute bottom-0 end-0"></span>
-                    </div>
-                    <div class="flex-grow-1 overflow-hidden">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h6 class="mb-0 fw-bold username-text text-truncate">${sender}</h6>
-                            <small class="text-muted last-msg-time"><span class="text-success small">Online</span></small>
-                        </div>
-                        <div class="d-flex justify-content-between align-items-center">
-                            <div class="last-msg-container overflow-hidden w-100 me-2">
-                                <p class="mb-0 last-msg-content text-dark fw-bold small text-truncate">${message}</p>
-                                <div class="dashboard-typing-indicator text-primary small fw-bold" style="display: none;">is typing...</div>
-                            </div>
-                            <div class="unread-badge-container"><span class="badge bg-primary rounded-pill small unread-count">1</span></div>
-                        </div>
-                    </div>
-                `;
-                userList.prepend(userRow);
-            } else {
-                const msgEl = userRow.querySelector('.last-msg-content');
-                msgEl.textContent = message;
-                
-                // If not active chat, show unread
-                if (activeChatUsername !== sender) {
-                    msgEl.classList.add('text-dark', 'fw-bold');
-                    const badgeContainer = userRow.querySelector('.unread-badge-container');
-                    let badge = badgeContainer.querySelector('.unread-count');
-                    if (badge) {
-                        badge.textContent = parseInt(badge.textContent) + 1;
+    async function loadChat(username) {
+        const response = await fetch(`/api/messages/${username}/`, { credentials: "same-origin" });
+        if (!response.ok) {
+            throw new Error(`Could not load chat for ${username}`);
+        }
+
+        const data = await response.json();
+        knownMessageIds.clear();
+        chatBox.innerHTML = "";
+        document.getElementById("active-chat-username").textContent = data.other_user.username;
+        document.getElementById("active-chat-avatar").textContent = data.other_user.initial;
+        setChatStatus(data.other_user);
+
+        data.messages.forEach(message => appendMessage(message));
+        ensureTypingBubble();
+        scrollToBottom();
+
+        if (data.messages.length) {
+            const lastMessage = data.messages[data.messages.length - 1];
+            updateUserRow(username, {
+                message: lastMessage.content,
+                timestamp: lastMessage.timestamp,
+                incrementUnread: false,
+                allowCreate: true
+            });
+        }
+    }
+
+    async function refreshActiveChat(username) {
+        if (!username) {
+            return;
+        }
+
+        const response = await fetch(`/api/messages/${username}/`, { credentials: "same-origin" });
+        if (!response.ok) {
+            return;
+        }
+
+        const data = await response.json();
+        setChatStatus(data.other_user);
+        data.messages.forEach(message => appendMessage(message));
+
+        if (data.messages.length) {
+            const lastMessage = data.messages[data.messages.length - 1];
+            updateUserRow(username, {
+                message: lastMessage.content,
+                timestamp: lastMessage.timestamp,
+                incrementUnread: false,
+                allowCreate: true
+            });
+        }
+
+        scrollToBottom();
+    }
+
+    function startActiveChatRefresh() {
+        clearInterval(chatRefreshTimer);
+        chatRefreshTimer = window.setInterval(() => {
+            if (document.visibilityState === "visible" && activeChatUsername) {
+                refreshActiveChat(activeChatUsername);
+            }
+        }, 2500);
+    }
+
+    function flushQueuedMessages() {
+        while (queuedMessages.length && chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify(queuedMessages.shift()));
+        }
+    }
+
+    function startHeartbeat(type) {
+        const timer = window.setInterval(() => {
+            const socket = type === "chat" ? chatSocket : dashboardSocket;
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "ping" }));
+            }
+        }, 25000);
+
+        if (type === "chat") {
+            clearInterval(chatHeartbeatTimer);
+            chatHeartbeatTimer = timer;
+        } else {
+            clearInterval(dashboardHeartbeatTimer);
+            dashboardHeartbeatTimer = timer;
+        }
+    }
+
+    function scheduleReconnect(type) {
+        const attempt = type === "chat" ? ++chatReconnectAttempts : ++dashboardReconnectAttempts;
+        const delay = Math.min(1000 * (2 ** (attempt - 1)), 10000);
+
+        if (type === "chat") {
+            clearTimeout(chatReconnectTimer);
+            chatReconnectTimer = window.setTimeout(() => {
+                if (activeChatUsername) {
+                    connectChatSocket(activeChatUsername);
+                }
+            }, delay);
+        } else {
+            clearTimeout(dashboardReconnectTimer);
+            dashboardReconnectTimer = window.setTimeout(connectDashboardSocket, delay);
+        }
+    }
+
+    function connectChatSocket(username) {
+        if (!username) {
+            return;
+        }
+
+        if (chatSocket) {
+            ignoreNextChatClose = true;
+            chatSocket.close();
+        }
+
+        chatSocket = new WebSocket(`${SOCKET_PROTOCOL}://${window.location.host}/ws/chat/${username}/`);
+
+        chatSocket.onopen = async function() {
+            chatReconnectAttempts = 0;
+            startHeartbeat("chat");
+            await loadChat(username);
+            flushQueuedMessages();
+        };
+
+        chatSocket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === "chat_message") {
+                hideTypingBubble();
+                appendMessage(data);
+                updateUserRow(data.sender === CURRENT_USERNAME ? activeChatUsername : data.sender, {
+                    message: data.message,
+                    timestamp: data.timestamp,
+                    incrementUnread: data.sender !== CURRENT_USERNAME && activeChatUsername !== data.sender,
+                    allowCreate: true
+                });
+                scrollToBottom();
+            } else if (data.type === "typing") {
+                if (data.is_typing) {
+                    showTypingBubble();
+                    clearTimeout(incomingTypingTimer);
+                    incomingTypingTimer = window.setTimeout(hideTypingBubble, 2200);
+                } else {
+                    clearTimeout(incomingTypingTimer);
+                    hideTypingBubble();
+                }
+            } else if (data.type === "read_receipt" && data.message_ids) {
+                updateReadReceipts(data.message_ids);
+            } else if (data.type === "user_status_update" && data.username === activeChatUsername) {
+                setChatStatus(data);
+            }
+        };
+
+        chatSocket.onerror = function() {
+            chatSocket.close();
+        };
+
+        chatSocket.onclose = function() {
+            clearInterval(chatHeartbeatTimer);
+            const wasManualClose = ignoreNextChatClose;
+            ignoreNextChatClose = false;
+            if (!wasManualClose && activeChatUsername === username) {
+                scheduleReconnect("chat");
+            }
+        };
+    }
+
+    function connectDashboardSocket() {
+        if (dashboardSocket && dashboardSocket.readyState !== WebSocket.CLOSED) {
+            dashboardSocket.close();
+        }
+
+        dashboardSocket = new WebSocket(`${SOCKET_PROTOCOL}://${window.location.host}/ws/dashboard/`);
+
+        dashboardSocket.onopen = function() {
+            dashboardReconnectAttempts = 0;
+            startHeartbeat("dashboard");
+        };
+
+        dashboardSocket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === "dashboard_update") {
+                updateUserRow(data.sender_username, {
+                    message: data.message,
+                    timestamp: data.timestamp,
+                    incrementUnread: activeChatUsername !== data.sender_username,
+                    initial: data.sender_initial,
+                    allowCreate: true
+                });
+            } else if (data.type === "dashboard_typing") {
+                updateUserRow(data.sender_username, {
+                    isTyping: data.is_typing,
+                    allowCreate: false
+                });
+                if (data.sender_username === activeChatUsername) {
+                    if (data.is_typing) {
+                        showTypingBubble();
+                        clearTimeout(incomingTypingTimer);
+                        incomingTypingTimer = window.setTimeout(hideTypingBubble, 2200);
                     } else {
-                        badgeContainer.innerHTML = `<span class="badge bg-primary rounded-pill small unread-count">1</span>`;
+                        clearTimeout(incomingTypingTimer);
+                        hideTypingBubble();
                     }
                 }
-                
-                const timeEl = userRow.querySelector('.last-msg-time');
-                if (!timeEl.querySelector('.text-success')) timeEl.textContent = time;
-                userList.prepend(userRow);
-            }
-        } else if (data.type === 'dashboard_typing') {
-            const sender = data.sender_username;
-            const userRow = document.querySelector(`.user-item[data-username="${sender}"]`);
-            if (userRow) {
-                const msgEl = userRow.querySelector('.last-msg-content');
-                const typingEl = userRow.querySelector('.dashboard-typing-indicator');
-                if (data.is_typing) {
-                    msgEl.style.display = 'none';
-                    typingEl.style.display = 'block';
-                } else {
-                    msgEl.style.display = 'block';
-                    typingEl.style.display = 'none';
+            } else if (data.type === "user_status_update") {
+                updateUserRow(data.username, {
+                    timestamp: data.last_seen,
+                    isOnline: data.is_online,
+                    allowCreate: false
+                });
+                if (data.username === activeChatUsername) {
+                    setChatStatus(data);
                 }
             }
-        } else if (data.type === 'user_status_update') {
-            const userRow = document.querySelector(`.user-item[data-username="${data.username}"]`);
-            if (userRow) {
-                const dot = userRow.querySelector('.status-dot');
-                const timeEl = userRow.querySelector('.last-msg-time');
-                if (data.is_online) {
-                    dot.className = 'status-dot online position-absolute bottom-0 end-0';
-                    timeEl.innerHTML = '<span class="text-success small">Online</span>';
-                } else {
-                    dot.className = 'status-dot offline position-absolute bottom-0 end-0';
-                    const time = new Date(data.last_seen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-                    timeEl.textContent = time;
-                }
+        };
+
+        dashboardSocket.onerror = function() {
+            dashboardSocket.close();
+        };
+
+        dashboardSocket.onclose = function() {
+            clearInterval(dashboardHeartbeatTimer);
+            scheduleReconnect("dashboard");
+        };
+    }
+
+    async function openChat(username) {
+        if (activeChatUsername === username && chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            return;
+        }
+
+        if (activeChatUsername !== username) {
+            queuedMessages.length = 0;
+            pendingMessages.clear();
+        }
+
+        document.querySelectorAll(".user-item").forEach(item => item.classList.remove("active-chat"));
+        const row = getUserRow(username);
+        if (row) {
+            row.classList.add("active-chat");
+            const lastMessageElement = row.querySelector(".last-msg-content");
+            const badgeContainer = row.querySelector(".unread-badge-container");
+            if (lastMessageElement) {
+                lastMessageElement.classList.remove("text-dark", "fw-bold");
+            }
+            if (badgeContainer) {
+                badgeContainer.innerHTML = "";
             }
         }
-    };
+
+        activeChatUsername = username;
+        chatPlaceholder.style.display = "none";
+        activeChatContainer.style.display = "flex";
+        chatBox.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div></div>';
+
+        try {
+            await loadChat(username);
+            connectChatSocket(username);
+            startActiveChatRefresh();
+        } catch (error) {
+            console.error("Error loading chat:", error);
+            chatBox.innerHTML = '<div class="text-center py-5 text-danger">Error loading conversation.</div>';
+        }
+    }
+
+    function sendTypingStatus(isTyping) {
+        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify({ type: "typing", is_typing: isTyping }));
+        }
+    }
+
+    function sendMessage() {
+        const message = chatInput.value.trim();
+        if (!message || !activeChatUsername) {
+            return;
+        }
+
+        const payload = {
+            type: "chat_message",
+            client_id: createClientId(),
+            message
+        };
+
+        appendMessage({
+            client_id: payload.client_id,
+            sender: CURRENT_USERNAME,
+            content: payload.message,
+            timestamp: new Date().toISOString(),
+            is_delivered: false,
+            is_read: false
+        }, true);
+
+        scrollToBottom();
+        if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+            chatSocket.send(JSON.stringify(payload));
+        } else {
+            queuedMessages.push(payload);
+        }
+
+        chatInput.value = "";
+        sendTypingStatus(false);
+    }
+
+    searchInput.addEventListener("input", () => {
+        const query = searchInput.value.trim().toLowerCase();
+
+        document.querySelectorAll(".user-item").forEach(item => {
+            const username = item.dataset.username.toLowerCase();
+            item.style.display = username.includes(query) ? "flex" : "none";
+        });
+
+        if (!query) {
+            resultsBox.style.display = "none";
+            return;
+        }
+
+        clearTimeout(searchTimer);
+        searchTimer = window.setTimeout(async () => {
+            const response = await fetch(`/api/users/search/?q=${encodeURIComponent(query)}`, {
+                credentials: "same-origin"
+            });
+            const data = await response.json();
+
+            if (!data.users.length) {
+                resultsBox.innerHTML = '<div class="p-3 text-center text-muted">No people found</div>';
+                resultsBox.style.display = "block";
+                return;
+            }
+
+            resultsBox.innerHTML = data.users.map(user => `
+                <a href="#" class="search-result-item" data-username="${escapeHtml(user.username)}">
+                    <div class="position-relative me-3">
+                        <div class="bg-secondary text-white rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; font-weight: bold;">
+                            ${escapeHtml(user.initial)}
+                        </div>
+                        <span class="status-dot ${user.is_online ? "online" : "offline"} position-absolute bottom-0 end-0"></span>
+                    </div>
+                    <div>
+                        <div class="fw-bold">${escapeHtml(user.full_name)}</div>
+                        <small class="text-muted">@${escapeHtml(user.username)}</small>
+                    </div>
+                </a>
+            `).join("");
+            resultsBox.style.display = "block";
+        }, 300);
+    });
+
+    resultsBox.addEventListener("click", event => {
+        const result = event.target.closest(".search-result-item");
+        if (!result) {
+            return;
+        }
+
+        event.preventDefault();
+        resultsBox.style.display = "none";
+        searchInput.value = "";
+        document.querySelectorAll(".user-item").forEach(item => {
+            item.style.display = "flex";
+        });
+        openChat(result.dataset.username);
+    });
+
+    document.addEventListener("click", event => {
+        if (!searchInput.contains(event.target) && !resultsBox.contains(event.target)) {
+            resultsBox.style.display = "none";
+        }
+    });
+
+    userList.addEventListener("click", event => {
+        const row = event.target.closest(".user-item");
+        if (row && window.innerWidth >= 768) {
+            event.preventDefault();
+            openChat(row.dataset.username);
+        }
+    });
+
+    chatSubmit.addEventListener("click", sendMessage);
+    chatInput.addEventListener("keyup", event => {
+        if (event.key === "Enter") {
+            sendMessage();
+        }
+    });
+    chatInput.addEventListener("input", () => {
+        sendTypingStatus(true);
+        clearTimeout(typingTimer);
+        typingTimer = window.setTimeout(() => sendTypingStatus(false), 1500);
+    });
+
+    connectDashboardSocket();
 </script>
 {% endblock %}

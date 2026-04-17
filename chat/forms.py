@@ -1,6 +1,8 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
+
 from .models import CustomUser
+
 
 class CustomUserCreationForm(UserCreationForm):
     email = forms.EmailField(required=True)
@@ -9,6 +11,9 @@ class CustomUserCreationForm(UserCreationForm):
     class Meta(UserCreationForm.Meta):
         model = CustomUser
         fields = ("email", "username")
+
+    def clean_email(self):
+        return self.cleaned_data["email"].strip().lower()
 
     def save(self, commit=True):
         user = super().save(commit=False)

@@ -3,7 +3,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Count, OuterRef, Q, Subquery
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy
 from django.views.generic import CreateView, ListView
 
@@ -102,7 +102,7 @@ def user_search_api(request):
 
 @login_required
 def chat_detail(request, username):
-    other_user = CustomUser.objects.get(username=username)
+    other_user = get_object_or_404(CustomUser, username=username)
     messages = Message.objects.filter(
         (Q(sender=request.user) & Q(receiver=other_user))
         | (Q(sender=other_user) & Q(receiver=request.user))
@@ -111,7 +111,7 @@ def chat_detail(request, username):
     # Mark messages as read when entering chat
     Message.objects.filter(
         sender=other_user, receiver=request.user, is_read=False
-    ).update(is_read=True)
+    ).update(is_read=True, is_delivered=True)
 
     return render(
         request, "chat.html", {"other_user": other_user, "chat_messages": messages}
@@ -120,7 +120,7 @@ def chat_detail(request, username):
 
 @login_required
 def chat_messages_api(request, username):
-    other_user = CustomUser.objects.get(username=username)
+    other_user = get_object_or_404(CustomUser, username=username)
     messages = Message.objects.filter(
         (Q(sender=request.user) & Q(receiver=other_user))
         | (Q(sender=other_user) & Q(receiver=request.user))
@@ -129,12 +129,14 @@ def chat_messages_api(request, username):
     # Mark as read
     Message.objects.filter(
         sender=other_user, receiver=request.user, is_read=False
-    ).update(is_read=True)
+    ).update(is_read=True, is_delivered=True)
 
     msg_list = []
     for m in messages:
         msg_list.append(
             {
+                "id": str(m.public_id),
+                "client_id": m.client_id,
                 "sender": m.sender.username,
                 "content": m.content,
                 "timestamp": m.timestamp.isoformat(),
