@@ -1,6 +1,9 @@
+import uuid
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
 
 
 class CustomUser(AbstractUser):
@@ -16,6 +19,8 @@ class CustomUser(AbstractUser):
 
 
 class Message(models.Model):
+    public_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    client_id = models.CharField(max_length=64, blank=True, null=True)
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="sent_messages"
     )
@@ -29,7 +34,20 @@ class Message(models.Model):
     is_delivered = models.BooleanField(default=False)
     is_read = models.BooleanField(default=False)
 
+    class Meta:
+        ordering = ["timestamp", "id"]
+        indexes = [
+            models.Index(fields=["sender", "receiver", "timestamp"]),
+            models.Index(fields=["receiver", "is_read", "timestamp"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sender", "client_id"],
+                condition=Q(client_id__isnull=False),
+                name="unique_sender_client_message",
+            )
+        ]
+
     def __str__(self):
-        return (
-            f"{self.sender.username} to {self.receiver.username}: {self.content[:20]}"
-        )
+        preview = (self.content or "")[:20]
+        return f"{self.sender.username} to {self.receiver.username}: {preview}"
